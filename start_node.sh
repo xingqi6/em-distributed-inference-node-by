@@ -22,9 +22,23 @@ if [ -n "$WEBDAV_URL" ]; then
     sys_data_sync copy secure_remote:$WEBDAV_REMOTE_PATH /app/config --config $CONF_PATH --transfers 4
 fi
 
-# 2. 启动 HF WebDAV 代理 (本地 8080)
-echo "Starting HF WebDAV Proxy..."
-nohup python3 /usr/local/bin/hf_dav.py > /app/adapter_data/dav.log 2>&1 &
+# 2. 启动 HF WebDAV 代理
+echo "Starting HF WebDAV Proxy (hf_dav.py)..."
+# 修复：不再重定向到文件，而是直接后台运行，这样报错会打印到 Docker Log
+# 并且记录 PID 以便检查
+python3 /usr/local/bin/hf_dav.py &
+DAV_PID=$!
+echo "Proxy PID: $DAV_PID"
+
+# 检查一下是否立刻退出了
+sleep 3
+if ! kill -0 $DAV_PID > /dev/null 2>&1; then
+    echo "❌ Fatal Error: hf_dav.py crashed immediately!"
+    echo "Check the logs above for Python errors."
+    exit 1
+else
+    echo "✅ Proxy is running."
+fi
 
 # 3. 启动 Alist
 echo "Starting Alist..."
@@ -38,7 +52,7 @@ api_resource_adapter admin set password
 
 # 5. 生成 .strm
 echo "Generating .strm files..."
-sleep 5
+sleep 2
 python3 /usr/local/bin/gen_strm.py
 
 # 6. 自动备份
