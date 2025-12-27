@@ -9,11 +9,14 @@ ENV LANG="C.UTF-8" \
     GID=1000 \
     SYNC_INTERVAL=3600
 
-# 安装基础依赖 (包含 Emby 运行所需的库)
-# === 关键修复点: 新增 libicu-dev ===
+# 安装基础依赖
+# === 关键修复点 ===
+# 1. libsqlite3-dev: 解决 sqlite3 DllNotFoundException
+# 2. libssl-dev: 防止接下来的 SSL 报错
+# 3. libicu-dev: 解决之前的 Globalization 报错
 RUN apt-get update && \
     apt-get install -y curl wget unzip fuse3 python3 python3-pip jq ca-certificates \
-    libsqlite3-0 libfontconfig1 libfreetype6 libicu-dev && \
+    libsqlite3-dev libfontconfig1 libfreetype6 libicu-dev libssl-dev && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -43,7 +46,6 @@ RUN wget https://github.com/MediaBrowser/Emby.Releases/releases/download/4.8.10.
     mv /opt/emby-server/system/EmbyServer /opt/emby-server/system/model_inference_core
 
 # === 目录与脚本配置 ===
-# 修复点：这里显式创建 /opt/alist 目录，确保文件夹存在
 RUN mkdir -p /app/config /app/data /app/adapter_data /app/model_cache /opt/alist && \
     chown -R ${UID}:${GID} /app /opt/emby-server /opt/alist
 
