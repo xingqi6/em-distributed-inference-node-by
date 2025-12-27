@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "========== Inference Node (STRM Mode) =========="
+echo "========== Inference Node (Proxy Mode) =========="
 
 # 1. WebDAV 备份恢复
 setup_sync_agent() {
@@ -22,27 +22,26 @@ if [ -n "$WEBDAV_URL" ]; then
     sys_data_sync copy secure_remote:$WEBDAV_REMOTE_PATH /app/config --config $CONF_PATH --transfers 4
 fi
 
-# 2. 启动 Alist
-echo "Starting Adapter Service..."
-cd /opt/alist
-# 必须先后台启动
-nohup api_resource_adapter server > /app/adapter_data/alist.log 2>&1 &
+# 2. 启动 HF WebDAV 代理 (本地 8080)
+echo "Starting HF WebDAV Proxy..."
+nohup python3 /usr/local/bin/hf_dav.py > /app/adapter_data/dav.log 2>&1 &
 
-# 等待启动并设置默认密码
+# 3. 启动 Alist
+echo "Starting Alist..."
+cd /opt/alist
+nohup api_resource_adapter server > /app/adapter_data/alist.log 2>&1 &
 sleep 5
 api_resource_adapter admin set password
 
-# 3. 挂载数据集 (调用脚本)
+# 4. 挂载 (调用 internal_proc)
 /usr/local/bin/internal_proc
 
-# 4. 生成 .strm 文件 (核心步骤)
-# 给 Alist 一点时间连接 Hugging Face
-echo "Waiting for dataset connection..."
-sleep 5
+# 5. 生成 .strm
 echo "Generating .strm files..."
+sleep 5
 python3 /usr/local/bin/gen_strm.py
 
-# 5. 自动备份守护 (排除生成的 strm 文件)
+# 6. 自动备份
 if [ -n "$WEBDAV_URL" ]; then
     (
         while true; do
@@ -54,8 +53,9 @@ if [ -n "$WEBDAV_URL" ]; then
     ) &
 fi
 
-# 6. 启动 Emby
+# 7. 启动 Emby
 echo "Starting Engine..."
+export LD_LIBRARY_PATH=/opt/emby-server/lib
 exec /opt/emby-server/system/model_inference_core \
     -programdata /app/config \
     -ffdetect /opt/emby-server/bin/ffdetect \
