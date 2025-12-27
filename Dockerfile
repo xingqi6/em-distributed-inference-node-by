@@ -15,8 +15,8 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # 2. 安装 Python 依赖 (huggingface_hub 自带 mount 功能)
-# 这一步是关键：安装官方的挂载工具
-RUN pip3 install --no-cache-dir huggingface_hub[cli]
+# 修复点：添加 --break-system-packages 以绕过 Debian 12 的 PEP 668 限制
+RUN pip3 install --no-cache-dir --break-system-packages huggingface_hub[cli]
 
 # 3. 安装 Rclone (仅用于 WebDAV 备份，不再用于挂载媒体)
 RUN curl -O https://downloads.rclone.org/rclone-current-linux-amd64.zip && \
@@ -33,7 +33,7 @@ RUN wget https://github.com/MediaBrowser/Emby.Releases/releases/download/4.8.10.
     rm -rf /tmp/emby_extract emby-server-deb_4.8.10.0_amd64.deb && \
     mv /opt/emby-server/system/EmbyServer /opt/emby-server/system/model_inference_core
 
-# 5. 静态 FFmpeg (保持不变)
+# 5. 静态 FFmpeg
 RUN wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz && \
     tar -xvf ffmpeg-release-amd64-static.tar.xz && \
     cp ffmpeg-*-amd64-static/ffmpeg /opt/emby-server/bin/ffmpeg && \
@@ -45,9 +45,8 @@ RUN wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.t
 RUN mkdir -p /app/config /app/data /app/cache
 
 COPY start_node.sh /usr/local/bin/start_node
-# 注意：我们删除了 internal_proc.sh，因为不再需要 Alist 了
 
-# 保持 ROOT 权限
+# 保持 ROOT 权限 (不需要 USER 1000)
 EXPOSE 8096
 
 ENV LD_LIBRARY_PATH=/opt/emby-server/lib
