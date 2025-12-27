@@ -5,7 +5,6 @@ import urllib.parse
 import sys
 import time
 
-# 配置
 ALIST_HOST = "http://127.0.0.1:5244"
 SOURCE_PATH = "/ExternalData"
 LOCAL_OUTPUT_DIR = "/app/data/ExternalData"
@@ -20,10 +19,13 @@ def get_token():
                 return r.json()['data']['token']
         except:
             pass
+        print(f"[Script] Waiting for Alist API ({i+1}/10)...")
         time.sleep(2)
+    print("[Error] Failed to get Alist token.")
     sys.exit(1)
 
 def process_folder(path, token, retry=0):
+    print(f"[Debug] Scanning folder: {path}") # 打印正在扫描的目录
     url = f"{ALIST_HOST}/api/fs/list"
     payload = {"path": path, "password": "", "page": 1, "per_page": 0, "refresh": True}
     headers = {"Authorization": token}
@@ -32,7 +34,6 @@ def process_folder(path, token, retry=0):
         r = requests.post(url, json=payload, headers=headers)
         data = r.json()
         
-        # 处理存储未找到的情况 (可能还没挂载好)
         if data['code'] != 200:
             if "storage not found" in data.get('message', '') and retry < 5:
                 print(f"[Wait] Storage not ready yet, retrying in 5s ({retry+1}/5)...")
@@ -44,6 +45,7 @@ def process_folder(path, token, retry=0):
 
         items = data['data']['content']
         if not items:
+            print(f"[Debug] Folder is empty: {path}")
             return
 
         for item in items:
@@ -51,9 +53,15 @@ def process_folder(path, token, retry=0):
             if item['is_dir']:
                 process_folder(full_path, token)
             else:
+                # 打印所有文件的信息
                 ext = os.path.splitext(item['name'])[1].lower()
-                if ext in ['.mp4', '.mkv', '.avi', '.mov', '.ts', '.iso', '.wmv', '.flv']:
+                print(f"[Debug] Found file: {item['name']} (Ext: {ext})")
+                
+                if ext in ['.mp4', '.mkv', '.avi', '.mov', '.ts', '.iso', '.wmv', '.flv', '.m4v', '.rmvb', '.webm']:
                     create_strm(full_path)
+                else:
+                    print(f"[Debug] Skipped (unknown extension): {item['name']}")
+
     except Exception as e:
         print(f"[Error] Processing {path}: {e}")
 
@@ -65,6 +73,7 @@ def create_strm(alist_path):
     
     local_file_path = os.path.join(LOCAL_OUTPUT_DIR, rel_path)
     local_file_path = os.path.splitext(local_file_path)[0] + ".strm"
+    
     os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
     
     encoded_path = urllib.parse.quote(alist_path)
@@ -78,8 +87,10 @@ def create_strm(alist_path):
         print(f"[Error] Failed to write {local_file_path}: {e}")
 
 if __name__ == "__main__":
-    print(">>> Starting .strm generation...")
+    print(">>> Starting .strm generation (Debug Mode)...")
     os.makedirs(LOCAL_OUTPUT_DIR, exist_ok=True)
+    
     token = get_token()
+    time.sleep(2)
     process_folder(SOURCE_PATH, token)
     print(">>> Generation complete.")
