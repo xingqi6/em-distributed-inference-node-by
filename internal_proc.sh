@@ -2,7 +2,6 @@
 
 log_proc() { echo "[Internal] $1"; }
 
-# 等待 API
 log_proc "Waiting for Alist API..."
 count=0
 while ! curl -s http://127.0.0.1:5244/api/public/settings > /dev/null; do
@@ -33,7 +32,7 @@ PAYLOAD=$(jq -n \
     --arg add "$ADDITION" \
     '{mount_path: $path, order: 0, remark: "HF_Dataset", cache_expiration: 30, driver: "HuggingFace", addition: $add}')
 
-log_proc "Mounting dataset: $DATASET_MUSIC_NAME to /ExternalData"
+log_proc "Mounting dataset: $DATASET_MUSIC_NAME"
 curl -s -X POST http://127.0.0.1:5244/api/admin/storage/create \
     -H "Authorization: $TOKEN" \
     -H "Content-Type: application/json" \
