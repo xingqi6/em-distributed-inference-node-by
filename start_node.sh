@@ -2,7 +2,7 @@
 
 echo "========== Inference Node (STRM Mode) =========="
 
-# 1. WebDAV 配置恢复
+# 1. WebDAV 备份恢复
 setup_sync_agent() {
     mkdir -p /app/config/sync_conf
     CONF_PATH="/tmp/secure_transport.conf"
@@ -25,27 +25,28 @@ fi
 # 2. 启动 Alist
 echo "Starting Adapter Service..."
 cd /opt/alist
+# 必须先后台启动
 nohup api_resource_adapter server > /app/adapter_data/alist.log 2>&1 &
 
-# 等待启动并设置密码
+# 等待启动并设置默认密码
 sleep 5
 api_resource_adapter admin set password
 
-# 3. 挂载数据集 (调用 internal_proc.sh)
+# 3. 挂载数据集 (调用脚本)
 /usr/local/bin/internal_proc
 
 # 4. 生成 .strm 文件 (核心步骤)
-# 等待挂载完成
+# 给 Alist 一点时间连接 Hugging Face
+echo "Waiting for dataset connection..."
 sleep 5
-echo "Generating .strm files from dataset..."
+echo "Generating .strm files..."
 python3 /usr/local/bin/gen_strm.py
 
-# 5. 自动备份守护
+# 5. 自动备份守护 (排除生成的 strm 文件)
 if [ -n "$WEBDAV_URL" ]; then
     (
         while true; do
             sleep "${SYNC_INTERVAL:-3600}"
-            # 排除生成的 strm 文件，因为它们每次启动都会重新生成
             sys_data_sync sync /app/config secure_remote:$WEBDAV_REMOTE_PATH \
                 --config /tmp/secure_transport.conf \
                 --exclude "cache/**" --exclude "logs/**" --exclude "metadata/**" --exclude "transcoding-temp/**"
