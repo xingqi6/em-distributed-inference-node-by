@@ -1,26 +1,31 @@
 #!/bin/bash
 log_proc() { echo "[Internal] $1"; }
 
-# 1. 等待 Alist API
+# 1. 等待 Alist
 log_proc "Waiting for Alist API..."
 while ! curl -s http://127.0.0.1:5244/api/public/settings > /dev/null; do
     sleep 2
 done
 
-# 2. 等待本地 WebDAV 代理启动
-log_proc "Waiting for HF WebDAV Proxy..."
+# 2. 等待 WebDAV 代理 (最多等 60秒)
+log_proc "Waiting for HF WebDAV Proxy (port 8080)..."
+count=0
 while ! curl -s http://127.0.0.1:8080/ > /dev/null; do
     sleep 2
+    count=$((count+1))
+    if [ $count -gt 30 ]; then
+        log_proc "❌ Proxy timeout! Check python logs."
+        exit 1
+    fi
 done
+log_proc "✅ Proxy is ready."
 
 TOKEN=$(curl -s -X POST http://127.0.0.1:5244/api/auth/login \
     -H "Content-Type: application/json" \
     -d '{"username":"admin","password":"password"}' | jq -r '.data.token')
 
 # 3. 挂载本地 WebDAV
-# 驱动: WebDAV
-# 地址: http://127.0.0.1:8080
-# 用户名/密码: 随意 (代理脚本设置了允许匿名)
+# 注意：这里 user/pass 随便填，因为 hf_dav.py 设置了匿名访问
 PAYLOAD=$(jq -n \
     --arg path "/ExternalData" \
     --arg url "http://127.0.0.1:8080" \
