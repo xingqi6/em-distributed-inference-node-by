@@ -14,14 +14,13 @@ logging.basicConfig(
 )
 log = logging.getLogger("hf_dav")
 
+# 屏蔽 httpx 的繁琐日志
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 REPO_ID = os.environ.get("DATASET_MUSIC_NAME")
 TOKEN = os.environ.get("MUSIC_TOKEN")
+if TOKEN == "": TOKEN = None
 PORT = 8080
-
-# === 修复 1: 处理空 Token ===
-# 如果 MUSIC_TOKEN 是空字符串，强制设为 None，否则会报 Bearer error
-if TOKEN == "":
-    TOKEN = None
 
 if not REPO_ID:
     log.error("❌ DATASET_MUSIC_NAME not set. Exiting.")
@@ -46,11 +45,7 @@ class HFResource(DAVNonCollection):
     def support_ranges(self): return False
 
     def get_content(self):
-        # 302 重定向到 HF 直链
         url = f"https://huggingface.co/datasets/{REPO_ID}/resolve/main/{self.file_info.path}"
-        # 如果是私有库，通常需要在 URL 后加 token 参数，或者 headers
-        # 但 WebDAV 客户端处理重定向通常不带 header。
-        # 对于私有数据集，HF 提供了 ?token=... 的方式，但这里暂只支持公开或不需要验证的直链
         log.info(f"Redirecting: {self.path} -> {url}")
         raise 302 
         return url
@@ -60,7 +55,6 @@ class HFCollection(DAVCollection):
         super().__init__(path, environ)
         self.children_map = children_map
 
-    # === 修复 2: 必须实现 get_member_names ===
     def get_member_names(self):
         return list(self.children_map.keys())
 
@@ -72,17 +66,19 @@ class HFProvider(DAVProvider):
         super().__init__()
         self.api = HfApi(token=TOKEN)
         self.tree = None
-        # 延迟初始化，防止启动时网络错误导致 crash
+        
+        # === 关键修复：构建一个 dummy environ，包含 provider 引用 ===
+        self.dummy_env = {"wsgidav.provider": self}
+
         try:
             self.refresh_tree()
         except Exception as e:
             log.error(f"⚠️ Initial tree fetch failed: {e}")
-            # 创建空树，保证服务能启动，等待下次刷新或请求
-            self.tree = HFCollection("/", None, {})
+            # 使用 dummy_env 而不是 None
+            self.tree = HFCollection("/", self.dummy_env, {})
 
     def refresh_tree(self):
         log.info(f"📡 Fetching file list from Hugging Face...")
-        # 获取文件列表
         files = self.api.list_repo_tree(repo_id=REPO_ID, repo_type="dataset", recursive=True)
         self.tree = self._build_tree(files)
         log.info(f"✅ Tree built successfully.")
@@ -91,7 +87,6 @@ class HFProvider(DAVProvider):
         root_map = {}
         path_to_map = {"": root_map}
         
-        # 排序：短路径在前，保证父目录先被处理
         sorted_files = sorted(files, key=lambda x: len(x.path.split('/')))
 
         for f in sorted_files:
@@ -102,18 +97,17 @@ class HFProvider(DAVProvider):
             parent_map = path_to_map.get(parent_path)
             if parent_map is None: continue 
 
+            # === 关键修复：传入 self.dummy_env ===
             if hasattr(f, 'size') and f.size is not None:
-                # 文件
-                node = HFResource(f"/{f.path}", None, f)
+                node = HFResource(f"/{f.path}", self.dummy_env, f)
                 parent_map[filename] = node
             else:
-                # 文件夹
                 new_map = {}
                 path_to_map[f.path] = new_map
-                node = HFCollection(f"/{f.path}", None, new_map)
+                node = HFCollection(f"/{f.path}", self.dummy_env, new_map)
                 parent_map[filename] = node
 
-        return HFCollection("/", None, root_map)
+        return HFCollection("/", self.dummy_env, root_map)
 
     def get_resource_inst(self, path, environ):
         if self.tree is None: return None
@@ -130,7 +124,6 @@ class HFProvider(DAVProvider):
                 return None
         return current
 
-# 配置 WsgiDAV
 config = {
     "provider_mapping": {"/": HFProvider()},
     "port": PORT,
