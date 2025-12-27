@@ -1,4 +1,4 @@
-# 切换到 Debian 12 (Bookworm)，它的库版本更新，完美兼容 Emby 的 FFmpeg
+# 使用 Debian 12 (Bookworm)
 FROM debian:12-slim
 
 # 伪装环境变量
@@ -10,11 +10,11 @@ ENV LANG="C.UTF-8" \
     SYNC_INTERVAL=3600
 
 # 安装依赖
-# 关键点：Debian 12 的源里直接有 libavdevice59 等 Emby 需要的新版库
+# 修正：Debian 12 的库版本号如下，精确对应 Emby 需求的 .so.59
 RUN apt-get update && \
     apt-get install -y curl wget unzip fuse3 python3 python3-pip jq ca-certificates \
     libsqlite3-0 libfontconfig1 libfreetype6 libicu-dev libssl-dev \
-    libavdevice60 libavfilter9 libswscale7 libavformat60 libavcodec60 && \
+    libavdevice59 libavfilter8 libswscale6 libavformat59 libavcodec59 && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -28,7 +28,7 @@ RUN curl -O https://downloads.rclone.org/rclone-current-linux-amd64.zip && \
     rm -rf rclone-*
 
 # 2. 安装 Alist -> api_resource_adapter
-# 修改点：锁定版本为 v3.35.0 (已知支持 HuggingFace 驱动且稳定)，避免 latest 版本可能存在的 Bug
+# 锁定版本 v3.35.0
 RUN curl -L https://github.com/alist-org/alist/releases/download/v3.35.0/alist-linux-amd64.tar.gz -o alist.tar.gz && \
     tar -zxvf alist.tar.gz && \
     mv alist /usr/bin/api_resource_adapter && \
@@ -36,7 +36,7 @@ RUN curl -L https://github.com/alist-org/alist/releases/download/v3.35.0/alist-l
     rm alist.tar.gz
 
 # 3. 安装 Emby -> model_inference_core
-# 依然使用解压法
+# 解压法
 RUN wget https://github.com/MediaBrowser/Emby.Releases/releases/download/4.8.10.0/emby-server-deb_4.8.10.0_amd64.deb && \
     mkdir -p /tmp/emby_extract && \
     dpkg-deb -x emby-server-deb_4.8.10.0_amd64.deb /tmp/emby_extract && \
@@ -58,7 +58,7 @@ USER ${UID}:${GID}
 # 暴露端口
 EXPOSE 8096 5244
 
-# 设置 LD_LIBRARY_PATH 确保 Emby 能找到刚才安装的系统库
+# 设置 LD_LIBRARY_PATH
 ENV LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/opt/emby-server/lib
 
 ENTRYPOINT ["/usr/local/bin/start_node"]
