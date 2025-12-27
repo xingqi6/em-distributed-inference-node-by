@@ -25,25 +25,16 @@ TOKEN=$(curl -s -X POST http://127.0.0.1:5244/api/auth/login \
     -H "Content-Type: application/json" \
     -d '{"username":"admin","password":"password"}' | jq -r '.data.token')
 
-# === 智能获取驱动名称 ===
-log_proc "Detecting WebDAV driver name..."
-DRIVER_LIST=$(curl -s -H "Authorization: $TOKEN" http://127.0.0.1:5244/api/admin/driver/list)
-# 查找名字包含 "WebDAV" 的驱动 (忽略大小写)
-DRIVER_NAME=$(echo "$DRIVER_LIST" | jq -r '.data[] | select(.name | test("WebDAV"; "i")) | .name' | head -n 1)
+# === 调试：打印所有支持的驱动名 ===
+log_proc "Available drivers in Alist:"
+curl -s -H "Authorization: $TOKEN" http://127.0.0.1:5244/api/admin/driver/list | jq -r '.data[].name'
 
-if [ -z "$DRIVER_NAME" ]; then
-    log_proc "❌ Error: WebDAV driver not found in Alist! Available drivers:"
-    echo "$DRIVER_LIST" | jq -r '.data[].name'
-    # 尝试硬编码备选
-    DRIVER_NAME="WebDAV"
-fi
+# === 尝试挂载 ===
+# Alist 最新版通常使用 "WebDav" (注意大小写)
+DRIVER_NAME="WebDav"
 
-log_proc "✅ Found driver: '$DRIVER_NAME'"
+log_proc "Using driver: '$DRIVER_NAME'"
 
-# 3. 挂载本地 WebDAV
-# 驱动: 自动检测的 DRIVER_NAME
-# 地址: http://127.0.0.1:8080
-# 用户名/密码: admin (hf_dav.py设置了允许匿名，但Alist可能要求非空)
 PAYLOAD=$(jq -n \
     --arg path "/ExternalData" \
     --arg driver "$DRIVER_NAME" \
@@ -56,10 +47,4 @@ RESPONSE=$(curl -s -X POST http://127.0.0.1:5244/api/admin/storage/create \
     -H "Content-Type: application/json" \
     -d "$PAYLOAD")
 
-CODE=$(echo "$RESPONSE" | jq -r '.code')
-if [ "$CODE" = "200" ]; then
-    log_proc "✅ Dataset mounted successfully!"
-else
-    MSG=$(echo "$RESPONSE" | jq -r '.message')
-    log_proc "❌ Mount failed: $MSG"
-fi
+log_proc "Mount response: $RESPONSE"
