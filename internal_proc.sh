@@ -1,8 +1,6 @@
 #!/bin/bash
-
 log_proc() { echo "[PROC] $(date '+%Y-%m-%d %H:%M:%S') [Internal]: $1"; }
 
-# 1. 等待 API 就绪
 log_proc "Waiting for Resource Adapter API..."
 count=0
 while ! curl -s http://127.0.0.1:5244/api/public/settings > /dev/null; do
@@ -14,7 +12,6 @@ while ! curl -s http://127.0.0.1:5244/api/public/settings > /dev/null; do
     fi
 done
 
-# 2. 获取 Token
 TOKEN=$(curl -s -X POST http://127.0.0.1:5244/api/auth/login \
     -H "Content-Type: application/json" \
     -d '{"username":"admin","password":"password"}' | jq -r '.data.token')
@@ -24,14 +21,12 @@ if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
     exit 1
 fi
 
-# 3. 检查环境变量
 if [ -z "$DATASET_MUSIC_NAME" ]; then
     log_proc "No dataset configured."
     exit 0
 fi
 
-# 4. 构建 Payload
-# 注意：v3.35.0 版本中 HuggingFace 驱动名称确定为 "HuggingFace"
+# 构建 Payload
 ADDITION=$(jq -n \
     --arg repo "$DATASET_MUSIC_NAME" \
     --arg token "${MUSIC_TOKEN:-}" \
@@ -43,7 +38,6 @@ PAYLOAD=$(jq -n \
     --arg add "$ADDITION" \
     '{mount_path: $path, order: 0, remark: "Auto_Mount", cache_expiration: 30, driver: "HuggingFace", addition: $add}')
 
-# 5. 发送挂载请求
 log_proc "Attaching dataset: $DATASET_MUSIC_NAME"
 RESPONSE=$(curl -s -X POST http://127.0.0.1:5244/api/admin/storage/create \
     -H "Authorization: $TOKEN" \
@@ -56,8 +50,5 @@ if [ "$CODE" = "200" ]; then
 else
     MSG=$(echo "$RESPONSE" | jq -r '.message')
     log_proc "Attachment failed: $MSG"
-    
-    # 调试：如果失败，打印一下当前支持的驱动列表，看看到底叫什么名字
-    log_proc "Debug: Listing available drivers..."
     curl -s -H "Authorization: $TOKEN" http://127.0.0.1:5244/api/admin/driver/list | jq -r '.data[].name' | grep -i "Hugging" | while read line; do log_proc "Found driver: $line"; done
 fi
