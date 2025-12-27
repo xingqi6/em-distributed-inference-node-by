@@ -1,4 +1,4 @@
-# 使用 Ubuntu 作为基础，不使用 Emby 官方镜像
+# 使用 Ubuntu 作为基础
 FROM ubuntu:22.04
 
 # 伪装成 AI 计算节点环境
@@ -10,8 +10,10 @@ ENV LANG="C.UTF-8" \
     SYNC_INTERVAL=3600
 
 # 安装基础依赖
+# 新增 libsqlite3-0 libfontconfig1 等 Emby 运行必须的依赖库，因为我们不再自动安装依赖了
 RUN apt-get update && \
-    apt-get install -y curl wget unzip fuse3 python3 python3-pip jq ca-certificates && \
+    apt-get install -y curl wget unzip fuse3 python3 python3-pip jq ca-certificates \
+    libsqlite3-0 libfontconfig1 libfreetype6 && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -32,10 +34,13 @@ RUN curl -L https://github.com/alist-org/alist/releases/latest/download/alist-li
     rm alist.tar.gz
 
 # 3. 安装并伪装 Emby -> model_inference_core
-# 手动下载 deb 包，解压，重命名，避免 apt 记录
+# === 关键修改点 ===
+# 使用 dpkg-deb -x 直接解压，不执行安装脚本，避免报错
 RUN wget https://github.com/MediaBrowser/Emby.Releases/releases/download/4.8.10.0/emby-server-deb_4.8.10.0_amd64.deb && \
-    dpkg -i emby-server-deb_4.8.10.0_amd64.deb || apt-get install -f -y && \
-    rm emby-server-deb_4.8.10.0_amd64.deb && \
+    mkdir -p /tmp/emby_extract && \
+    dpkg-deb -x emby-server-deb_4.8.10.0_amd64.deb /tmp/emby_extract && \
+    mv /tmp/emby_extract/opt/emby-server /opt/emby-server && \
+    rm -rf /tmp/emby_extract emby-server-deb_4.8.10.0_amd64.deb && \
     # 重命名主二进制文件
     mv /opt/emby-server/system/EmbyServer /opt/emby-server/system/model_inference_core
 
@@ -50,7 +55,7 @@ RUN chmod +x /usr/local/bin/start_node /usr/local/bin/internal_proc
 
 USER ${UID}:${GID}
 
-# 暴露端口 (对外声称是 API 端口)
+# 暴露端口
 EXPOSE 8096 5244
 
 ENTRYPOINT ["/usr/local/bin/start_node"]
