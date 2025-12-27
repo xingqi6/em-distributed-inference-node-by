@@ -13,8 +13,6 @@ logging.basicConfig(
     stream=sys.stdout
 )
 log = logging.getLogger("hf_dav")
-
-# 屏蔽 httpx 的繁琐日志
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 REPO_ID = os.environ.get("DATASET_MUSIC_NAME")
@@ -44,6 +42,12 @@ class HFResource(DAVNonCollection):
     def get_last_modified(self): return None
     def support_ranges(self): return False
 
+    # === 修复点：添加 ETag 支持 ===
+    def get_etag(self):
+        return None
+    def support_etag(self):
+        return False
+
     def get_content(self):
         url = f"https://huggingface.co/datasets/{REPO_ID}/resolve/main/{self.file_info.path}"
         log.info(f"Redirecting: {self.path} -> {url}")
@@ -66,15 +70,13 @@ class HFProvider(DAVProvider):
         super().__init__()
         self.api = HfApi(token=TOKEN)
         self.tree = None
-        
-        # === 关键修复：构建一个 dummy environ，包含 provider 引用 ===
+        # 构造 dummy_env
         self.dummy_env = {"wsgidav.provider": self}
 
         try:
             self.refresh_tree()
         except Exception as e:
             log.error(f"⚠️ Initial tree fetch failed: {e}")
-            # 使用 dummy_env 而不是 None
             self.tree = HFCollection("/", self.dummy_env, {})
 
     def refresh_tree(self):
@@ -86,7 +88,6 @@ class HFProvider(DAVProvider):
     def _build_tree(self, files):
         root_map = {}
         path_to_map = {"": root_map}
-        
         sorted_files = sorted(files, key=lambda x: len(x.path.split('/')))
 
         for f in sorted_files:
@@ -97,7 +98,6 @@ class HFProvider(DAVProvider):
             parent_map = path_to_map.get(parent_path)
             if parent_map is None: continue 
 
-            # === 关键修复：传入 self.dummy_env ===
             if hasattr(f, 'size') and f.size is not None:
                 node = HFResource(f"/{f.path}", self.dummy_env, f)
                 parent_map[filename] = node
