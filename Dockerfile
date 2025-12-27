@@ -1,4 +1,4 @@
-# 使用 Debian 12
+# 使用 Debian 12 (为了兼容性)
 FROM debian:12-slim
 
 ENV LANG="C.UTF-8" \
@@ -7,22 +7,26 @@ ENV LANG="C.UTF-8" \
     SYNC_INTERVAL=3600
 
 # 1. 安装基础依赖
+# 新增: python3-requests (用于 strm 生成脚本)
 RUN apt-get update && \
-    apt-get install -y curl wget unzip fuse3 python3 python3-pip jq ca-certificates \
+    apt-get install -y curl wget unzip python3 python3-pip python3-requests jq ca-certificates \
     libsqlite3-0 libfontconfig1 libfreetype6 libicu-dev libssl-dev libatomic1 xz-utils && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# 2. 安装 Python 依赖 (huggingface_hub)
-# 绕过 PEP 668 限制
-RUN pip3 install --no-cache-dir --break-system-packages huggingface_hub[cli]
-
-# 3. 安装 Rclone (WebDAV 备份)
+# 2. 安装 Rclone (仅用于 WebDAV 备份配置)
 RUN curl -O https://downloads.rclone.org/rclone-current-linux-amd64.zip && \
     unzip rclone-current-linux-amd64.zip && \
     cp rclone-*-linux-amd64/rclone /usr/bin/sys_data_sync && \
     chmod 755 /usr/bin/sys_data_sync && \
     rm -rf rclone-*
+
+# 3. 安装 Alist (最新版，确保支持 HuggingFace)
+RUN curl -L https://github.com/alist-org/alist/releases/latest/download/alist-linux-amd64.tar.gz -o alist.tar.gz && \
+    tar -zxvf alist.tar.gz && \
+    mv alist /usr/bin/api_resource_adapter && \
+    chmod +x /usr/bin/api_resource_adapter && \
+    rm alist.tar.gz
 
 # 4. 安装 Emby
 RUN wget https://github.com/MediaBrowser/Emby.Releases/releases/download/4.8.10.0/emby-server-deb_4.8.10.0_amd64.deb && \
@@ -40,13 +44,15 @@ RUN wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.t
     chmod +x /opt/emby-server/bin/ffmpeg /opt/emby-server/bin/ffprobe && \
     rm -rf ffmpeg-*
 
-# === 目录配置 ===
-RUN mkdir -p /app/config /app/data /app/cache
+# === 目录与脚本配置 ===
+RUN mkdir -p /app/config /app/data /app/adapter_data /opt/alist
 
 COPY start_node.sh /usr/local/bin/start_node
+COPY internal_proc.sh /usr/local/bin/internal_proc
+COPY gen_strm.py /usr/local/bin/gen_strm.py
 
-# === 关键修复：赋予启动脚本执行权限 ===
-RUN chmod +x /usr/local/bin/start_node
+# 赋予权限
+RUN chmod +x /usr/local/bin/start_node /usr/local/bin/internal_proc
 
 # 保持 ROOT 权限
 EXPOSE 8096
