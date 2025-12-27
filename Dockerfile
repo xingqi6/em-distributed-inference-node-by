@@ -7,18 +7,17 @@ ENV LANG="C.UTF-8" \
     SYNC_INTERVAL=3600
 
 # 1. 安装基础依赖
-# 新增: pip (为了安装 huggingface_hub)
 RUN apt-get update && \
     apt-get install -y curl wget unzip fuse3 python3 python3-pip jq ca-certificates \
     libsqlite3-0 libfontconfig1 libfreetype6 libicu-dev libssl-dev libatomic1 xz-utils && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# 2. 安装 Python 依赖 (huggingface_hub 自带 mount 功能)
-# 修复点：添加 --break-system-packages 以绕过 Debian 12 的 PEP 668 限制
+# 2. 安装 Python 依赖 (huggingface_hub)
+# 绕过 PEP 668 限制
 RUN pip3 install --no-cache-dir --break-system-packages huggingface_hub[cli]
 
-# 3. 安装 Rclone (仅用于 WebDAV 备份，不再用于挂载媒体)
+# 3. 安装 Rclone (WebDAV 备份)
 RUN curl -O https://downloads.rclone.org/rclone-current-linux-amd64.zip && \
     unzip rclone-current-linux-amd64.zip && \
     cp rclone-*-linux-amd64/rclone /usr/bin/sys_data_sync && \
@@ -46,7 +45,10 @@ RUN mkdir -p /app/config /app/data /app/cache
 
 COPY start_node.sh /usr/local/bin/start_node
 
-# 保持 ROOT 权限 (不需要 USER 1000)
+# === 关键修复：赋予启动脚本执行权限 ===
+RUN chmod +x /usr/local/bin/start_node
+
+# 保持 ROOT 权限
 EXPOSE 8096
 
 ENV LD_LIBRARY_PATH=/opt/emby-server/lib
