@@ -34,7 +34,8 @@ fi
 # 3. 启动伪装后的 Alist
 log_process "Starting Resource Adapter Service..."
 cd /opt/alist
-./../bin/api_resource_adapter admin set password >/dev/null 2>&1 &
+# 修复点：直接调用 api_resource_adapter (已在 PATH 中)
+api_resource_adapter admin set password >/dev/null 2>&1 &
 nohup api_resource_adapter server >/dev/null 2>&1 &
 /usr/local/bin/internal_proc &
 
