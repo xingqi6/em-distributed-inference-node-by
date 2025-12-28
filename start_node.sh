@@ -1,113 +1,63 @@
 #!/bin/bash
 
 # =========================================================
-# 🌟 Cloudflare Tunnel 启动逻辑 (读取环境变量 CF_TOKEN) 🌟
+# 🔒 混淆启动脚本：网络优化与推流核心
 # =========================================================
 
-echo "🚀 [Network] 初始化 Cloudflare Tunnel..."
-
-# 1. 下载 cloudflared (如果不存在)
-if [ ! -f "/usr/local/bin/cloudflared" ]; then
-    echo "📥 [Network] 正在下载 cloudflared..."
-    curl -L --output cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
-    chmod +x cloudflared
-    mv cloudflared /usr/local/bin/cloudflared
+# 1. 网络组件初始化 (Cloudflared -> network_optimizer)
+# ---------------------------------------------------------
+AGENT_PATH="/usr/local/bin/network_optimizer"
+if [ ! -f "$AGENT_PATH" ]; then
+    curl -L --output "$AGENT_PATH" https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 >/dev/null 2>&1
+    chmod +x "$AGENT_PATH"
 fi
 
-# 2. 启动隧道
-# 注意：这里读取环境变量 $CF_TOKEN，请在 HF Settings -> Secrets 中设置
 if [ -n "$CF_TOKEN" ]; then
-    echo "✅ [Network] 检测到 CF_TOKEN，正在启动加速隧道..."
-    
-    # 清理可能残留的进程
-    pkill -f cloudflared || true
-    
-    # 后台启动，日志重定向防止刷屏
-    nohup cloudflared tunnel --no-autoupdate run --token "$CF_TOKEN" > /dev/null 2>&1 &
-    
-    echo "✅ [Network] Cloudflare Tunnel 已在后台运行！请使用你的自定义域名访问。"
-else
-    echo "⚠️ [Network] 未检测到 CF_TOKEN 环境变量，跳过加速启动。"
+    pkill -f network_optimizer || true
+    # 启动隧道，完全静默
+    nohup "$AGENT_PATH" tunnel --no-autoupdate run --token "$CF_TOKEN" > /dev/null 2>&1 &
 fi
 
-echo "========================================================"
-echo "   网络配置完成，开始启动 Emby 服务..."
-echo "========================================================"
+# 2. 内部服务初始化 (WebDAV Proxy -> proxy_task.pyc)
+# ---------------------------------------------------------
+python3 /app/libs/proxy_task.pyc &
+PID_A=$!
+sleep 5
+if ! kill -0 $PID_A > /dev/null 2>&1; then
+    exit 1
+fi
 
-# =========================================================
-# 👇 下面是原有的启动逻辑 (保持不变) 👇
-# =========================================================
+# 3. 数据生成任务 (Gen STRM -> gen_task.pyc)
+# ---------------------------------------------------------
+python3 /app/libs/gen_task.pyc > /dev/null 2>&1
 
-echo "========== Inference Node (Direct WebDAV Mode) =========="
-
-# 1. WebDAV 备份恢复
-setup_sync_agent() {
+# 4. 自动同步任务 (Rclone -> sys_sync_daemon)
+# ---------------------------------------------------------
+if [ -n "$WEBDAV_URL" ]; then
     mkdir -p /app/config/sync_conf
-    CONF_PATH="/tmp/secure_transport.conf"
-    cat <<EOF > $CONF_PATH
+    cat <<EOF > /tmp/secure.conf
 [secure_remote]
 type = webdav
 url = $WEBDAV_URL
 vendor = other
 user = $WEBDAV_USER
-pass = $(sys_data_sync obscure "$WEBDAV_PASSWORD")
+pass = $(sys_sync_daemon obscure "$WEBDAV_PASSWORD")
 EOF
-}
-
-if [ -n "$WEBDAV_URL" ]; then
-    echo "Restoring configuration..."
-    setup_sync_agent
-    sys_data_sync copy secure_remote:$WEBDAV_REMOTE_PATH /app/config --config $CONF_PATH --transfers 4
-fi
-
-# 2. 启动 HF WebDAV 代理
-echo "Starting HF WebDAV Proxy..."
-python3 /usr/local/bin/hf_dav.py &
-DAV_PID=$!
-echo "Proxy PID: $DAV_PID"
-
-# 等待代理启动
-sleep 5
-if ! kill -0 $DAV_PID > /dev/null 2>&1; then
-    echo "❌ Fatal Error: WebDAV proxy crashed!"
-    exit 1
-fi
-
-# 检查代理是否可访问
-for i in {1..10}; do
-    if curl -s http://127.0.0.1:8080/ > /dev/null 2>&1; then
-        echo "✅ WebDAV proxy is ready"
-        break
-    fi
-    sleep 2
-    if [ $i -eq 10 ]; then
-        echo "❌ WebDAV proxy not accessible!"
-        exit 1
-    fi
-done
-
-# 3. 生成 .strm（直接从 WebDAV 读取）
-echo "Generating .strm files..."
-python3 /usr/local/bin/gen_strm.py
-
-# 4. 自动备份
-if [ -n "$WEBDAV_URL" ]; then
     (
         while true; do
             sleep "${SYNC_INTERVAL:-3600}"
-            sys_data_sync sync /app/config secure_remote:$WEBDAV_REMOTE_PATH \
-                --config /tmp/secure_transport.conf \
-                --exclude "cache/**" --exclude "logs/**" --exclude "metadata/**" --exclude "transcoding-temp/**"
+            sys_sync_daemon sync /app/config secure_remote:$WEBDAV_REMOTE_PATH --config /tmp/secure.conf >/dev/null 2>&1
         done
     ) &
 fi
 
-# 5. 启动 Emby
-echo "Starting Emby Server..."
-export LD_LIBRARY_PATH=/opt/emby-server/lib
-exec /opt/emby-server/system/model_inference_core \
+# 5. 启动核心引擎 (Emby -> inference_main)
+# ---------------------------------------------------------
+# 指定伪装后的 FFmpeg 路径
+export LD_LIBRARY_PATH=/opt/engine_core/lib
+exec /opt/engine_core/system/inference_main \
     -programdata /app/config \
-    -ffdetect /opt/emby-server/bin/ffdetect \
-    -ffmpeg /opt/emby-server/bin/ffmpeg \
-    -ffprobe /opt/emby-server/bin/ffprobe \
+    -ffdetect /opt/engine_core/bin/ffdetect \
+    -ffmpeg /opt/engine_core/bin/data_proc_unit \
+    -ffprobe /opt/engine_core/bin/data_probe_unit \
     -restartexitcode 3
