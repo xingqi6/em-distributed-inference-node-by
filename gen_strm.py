@@ -9,68 +9,89 @@ ALIST_HOST = "http://127.0.0.1:5244"
 SOURCE_PATH = "/ExternalData"
 LOCAL_OUTPUT_DIR = "/app/data/ExternalData"
 
+VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.avi', '.mov', '.ts', '.iso', '.wmv', 
+                    '.flv', '.m4v', '.rmvb', '.webm', '.mpg', '.mpeg', '.m2ts'}
+
 def get_token():
     url = f"{ALIST_HOST}/api/auth/login"
     payload = {"username": "admin", "password": "password"}
     for i in range(10):
         try:
-            r = requests.post(url, json=payload)
+            r = requests.post(url, json=payload, timeout=5)
             if r.status_code == 200:
+                print("[Token] ✅ Authenticated")
                 return r.json()['data']['token']
-        except:
-            pass
-        print(f"[Script] Waiting for Alist API ({i+1}/10)...")
+        except Exception as e:
+            print(f"[Token] Retry {i+1}/10: {e}")
         time.sleep(2)
-    print("[Error] Failed to get Alist token.")
+    print("[Token] ❌ Failed")
     sys.exit(1)
 
+def test_mount(token):
+    """测试挂载点是否可访问"""
+    url = f"{ALIST_HOST}/api/fs/list"
+    payload = {"path": SOURCE_PATH, "password": "", "page": 1, "per_page": 10, "refresh": False}
+    headers = {"Authorization": token}
+    
+    try:
+        r = requests.post(url, json=payload, headers=headers, timeout=10)
+        data = r.json()
+        if data['code'] == 200:
+            items = data['data']['content']
+            print(f"[Mount] ✅ Accessible, {len(items)} items found")
+            return True
+        else:
+            print(f"[Mount] ❌ Error: {data.get('message')}")
+            return False
+    except Exception as e:
+        print(f"[Mount] ❌ Exception: {e}")
+        return False
+
 def process_folder(path, token, retry=0):
-    print(f"[Debug] Scanning folder: {path}") # 打印正在扫描的目录
+    print(f"[Scan] 📁 {path}")
     url = f"{ALIST_HOST}/api/fs/list"
     payload = {"path": path, "password": "", "page": 1, "per_page": 0, "refresh": True}
     headers = {"Authorization": token}
     
     try:
-        r = requests.post(url, json=payload, headers=headers)
+        r = requests.post(url, json=payload, headers=headers, timeout=15)
         data = r.json()
         
         if data['code'] != 200:
-            if "storage not found" in data.get('message', '') and retry < 5:
-                print(f"[Wait] Storage not ready yet, retrying in 5s ({retry+1}/5)...")
+            if "storage not found" in data.get('message', '').lower() and retry < 5:
+                print(f"[Scan] ⏳ Storage not ready, retry {retry+1}/5...")
                 time.sleep(5)
                 return process_folder(path, token, retry + 1)
-            
-            print(f"[Skip] Error listing {path}: {data.get('message')}")
+            print(f"[Scan] ❌ Error: {data.get('message')}")
             return
-
+        
         items = data['data']['content']
         if not items:
-            print(f"[Debug] Folder is empty: {path}")
+            print(f"[Scan] 📭 Empty folder")
             return
-
+        
+        video_count = 0
+        folder_count = 0
+        
         for item in items:
             full_path = f"{path}/{item['name']}"
             if item['is_dir']:
+                folder_count += 1
                 process_folder(full_path, token)
             else:
-                # 打印所有文件的信息
                 ext = os.path.splitext(item['name'])[1].lower()
-                print(f"[Debug] Found file: {item['name']} (Ext: {ext})")
-                
-                if ext in ['.mp4', '.mkv', '.avi', '.mov', '.ts', '.iso', '.wmv', '.flv', '.m4v', '.rmvb', '.webm']:
+                if ext in VIDEO_EXTENSIONS:
+                    video_count += 1
                     create_strm(full_path)
-                else:
-                    print(f"[Debug] Skipped (unknown extension): {item['name']}")
-
+        
+        if video_count > 0 or folder_count > 0:
+            print(f"[Scan] 📊 {path}: {video_count} videos, {folder_count} folders")
+    
     except Exception as e:
-        print(f"[Error] Processing {path}: {e}")
+        print(f"[Scan] ❌ {path}: {e}")
 
 def create_strm(alist_path):
-    if alist_path.startswith(SOURCE_PATH):
-        rel_path = alist_path[len(SOURCE_PATH):].lstrip('/')
-    else:
-        rel_path = alist_path.lstrip('/')
-    
+    rel_path = alist_path[len(SOURCE_PATH):].lstrip('/') if alist_path.startswith(SOURCE_PATH) else alist_path.lstrip('/')
     local_file_path = os.path.join(LOCAL_OUTPUT_DIR, rel_path)
     local_file_path = os.path.splitext(local_file_path)[0] + ".strm"
     
@@ -82,15 +103,33 @@ def create_strm(alist_path):
     try:
         with open(local_file_path, 'w', encoding='utf-8') as f:
             f.write(stream_url)
-        print(f"[Created] {local_file_path}")
+        print(f"[STRM] ✅ {os.path.basename(local_file_path)}")
     except Exception as e:
-        print(f"[Error] Failed to write {local_file_path}: {e}")
+        print(f"[STRM] ❌ {local_file_path}: {e}")
 
 if __name__ == "__main__":
-    print(">>> Starting .strm generation (Debug Mode)...")
+    print("=" * 60)
+    print("🎬 STRM Generator - Enhanced Debug Mode")
+    print("=" * 60)
+    
     os.makedirs(LOCAL_OUTPUT_DIR, exist_ok=True)
     
     token = get_token()
-    time.sleep(2)
+    print("\n[Test] Testing mount accessibility...")
+    time.sleep(3)
+    
+    if not test_mount(token):
+        print("\n❌ Mount point not accessible. Check:")
+        print("  1. Is DATASET_MUSIC_NAME correct?")
+        print("  2. Is hf_dav.py running?")
+        print("  3. Did Alist mount succeed?")
+        sys.exit(1)
+    
+    print("\n[Gen] Starting generation...")
     process_folder(SOURCE_PATH, token)
-    print(">>> Generation complete.")
+    
+    # 统计结果
+    total_strm = sum(1 for root, _, files in os.walk(LOCAL_OUTPUT_DIR) for f in files if f.endswith('.strm'))
+    print("\n" + "=" * 60)
+    print(f"✅ Generation complete: {total_strm} .strm files created")
+    print("=" * 60)
