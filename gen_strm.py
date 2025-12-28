@@ -9,6 +9,9 @@ from xml.etree import ElementTree as ET
 WEBDAV_HOST = "http://127.0.0.1:8080"
 LOCAL_OUTPUT_DIR = "/app/data/ExternalData"
 
+# 可选：如果你有 CloudFlare Worker 代理，在环境变量中设置
+CF_WORKER_URL = os.environ.get("CF_WORKER_URL", "")  # 例如: https://ey.2rr.dpdns.org
+
 VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.avi', '.mov', '.ts', '.iso', '.wmv', 
                     '.flv', '.m4v', '.rmvb', '.webm', '.mpg', '.mpeg', '.m2ts'}
 
@@ -97,8 +100,7 @@ def process_folder(path="/"):
         print(f"[Scan] 📊 {path}: {video_count} videos, {folder_count} folders")
 
 def create_strm(webdav_path):
-    """创建 .strm 文件"""
-    # 移除开头的斜杠
+    """创建 .strm 文件，支持多种方式"""
     rel_path = webdav_path.lstrip('/')
     
     local_file_path = os.path.join(LOCAL_OUTPUT_DIR, rel_path)
@@ -106,26 +108,53 @@ def create_strm(webdav_path):
     
     os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
     
-    # HF 直链
     repo_id = os.environ.get("DATASET_MUSIC_NAME")
-    stream_url = f"https://ey.2rr.dpdns.org?url={urllib.parse.quote(hf_url)}"
+    encoded_path = urllib.parse.quote(rel_path, safe='')
+    
+    # 🎯 方案选择（按优先级）
+    # 方案1: CloudFlare Worker 代理（如果配置了）
+    if CF_WORKER_URL:
+        hf_direct_url = f"https://huggingface.co/datasets/{repo_id}/resolve/main/{encoded_path}"
+        stream_url = f"{CF_WORKER_URL}?url={urllib.parse.quote(hf_direct_url)}"
+        method = "CF Worker"
+    
+    # 方案2: HF CDN 直链（公开 Dataset）
+    else:
+        stream_url = f"https://huggingface.co/datasets/{repo_id}/resolve/main/{encoded_path}?download=true"
+        method = "HF CDN"
     
     try:
         with open(local_file_path, 'w', encoding='utf-8') as f:
             f.write(stream_url)
-        print(f"[STRM] ✅ {os.path.basename(local_file_path)}")
+        
+        # 只显示文件名，避免日志过长
+        filename = os.path.basename(local_file_path)
+        if len(filename) > 50:
+            filename = filename[:47] + "..."
+        print(f"[STRM] ✅ {filename} ({method})")
     except Exception as e:
         print(f"[STRM] ❌ {local_file_path}: {e}")
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("🎬 STRM Generator - Direct WebDAV Mode")
+    print("🎬 STRM Generator - Universal Mode")
     print("=" * 60)
     
     # 检查环境变量
-    if not os.environ.get("DATASET_MUSIC_NAME"):
+    repo_id = os.environ.get("DATASET_MUSIC_NAME")
+    if not repo_id:
         print("❌ DATASET_MUSIC_NAME not set!")
         sys.exit(1)
+    
+    print(f"📦 Dataset: {repo_id}")
+    
+    # 检测使用的方案
+    if CF_WORKER_URL:
+        print(f"🌐 Using CF Worker: {CF_WORKER_URL}")
+        print("⚠️  Make sure your worker is accessible from HF Space")
+    else:
+        print("🌐 Using HF CDN direct links")
+        print("⚠️  Dataset must be public, or links may fail")
     
     os.makedirs(LOCAL_OUTPUT_DIR, exist_ok=True)
     
@@ -146,10 +175,47 @@ if __name__ == "__main__":
     
     print("\n[Gen] Starting generation...")
     time.sleep(2)
+    
+    start_time = time.time()
     process_folder("/")
+    elapsed = time.time() - start_time
     
     # 统计结果
-    total_strm = sum(1 for root, _, files in os.walk(LOCAL_OUTPUT_DIR) for f in files if f.endswith('.strm'))
+    total_strm = sum(1 for root, _, files in os.walk(LOCAL_OUTPUT_DIR) 
+                     for f in files if f.endswith('.strm'))
+    
     print("\n" + "=" * 60)
-    print(f"✅ Generation complete: {total_strm} .strm files created")
+    print(f"✅ Complete: {total_strm} files in {elapsed:.1f}s")
     print("=" * 60)
+    
+    # 显示示例链接
+    if total_strm > 0:
+        for root, _, files in os.walk(LOCAL_OUTPUT_DIR):
+            for f in files:
+                if f.endswith('.strm'):
+                    sample_file = os.path.join(root, f)
+                    with open(sample_file, 'r', encoding='utf-8') as sf:
+                        sample_url = sf.read().strip()
+                    
+                    print(f"\n📺 Sample STRM content:")
+                    # 只显示前150个字符
+                    if len(sample_url) > 150:
+                        print(f"   {sample_url[:150]}...")
+                    else:
+                        print(f"   {sample_url}")
+                    
+                    # 测试链接是否可访问
+                    print(f"\n🔍 Testing link accessibility...")
+                    try:
+                        test_resp = requests.head(sample_url, timeout=5, allow_redirects=True)
+                        if test_resp.status_code == 200:
+                            content_type = test_resp.headers.get('content-type', 'unknown')
+                            content_length = test_resp.headers.get('content-length', 'unknown')
+                            print(f"   ✅ Link OK: {content_type}, {content_length} bytes")
+                        else:
+                            print(f"   ⚠️  Status: {test_resp.status_code}")
+                    except Exception as e:
+                        print(f"   ❌ Test failed: {e}")
+                    
+                    break
+            break
