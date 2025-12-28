@@ -6,14 +6,16 @@ ENV LANG="C.UTF-8" \
     SYNC_INTERVAL=3600
 
 # =========================================================
-# 1. 安装系统依赖 & 修复字体 & 进程管理工具
+# 1. 安装系统依赖 & 工具包
 # =========================================================
 RUN apt-get update && \
-    # 🌟 新增 procps (包含 pkill/ps)，修复启动脚本报错
+    # 🌟 新增: 
+    # - procps: 提供 pkill 命令，修复启动报错
+    # - socat: 提供端口转发，解决 Hugging Face 卡 Starting 问题
     apt-get install -y curl wget unzip python3 python3-pip python3-requests python3-lxml jq ca-certificates \
     libsqlite3-0 libfreetype6 libicu-dev libssl-dev libatomic1 xz-utils \
-    fontconfig fonts-noto-cjk procps && \
-    # 🌟 强制刷新字体缓存 (解决转码 500 报错)
+    fontconfig fonts-noto-cjk procps socat && \
+    # 🌟 修复: 强制刷新字体缓存
     fc-cache -f -v && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
@@ -55,7 +57,7 @@ RUN wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.t
 # =========================================================
 RUN mkdir -p /app/config /app/data /app/libs
 
-# 复制并重命名脚本
+# 复制脚本
 COPY start_node.sh /usr/local/bin/entry_point
 COPY internal_proc.sh /usr/local/bin/monitor_proc
 COPY gen_strm.py /app/libs/gen_task.py
@@ -71,6 +73,7 @@ RUN python3 -m compileall /app/libs && \
     find /app/libs/__pycache__ -name "proxy_task*.pyc" -exec mv {} /app/libs/proxy_task.pyc \; && \
     rm -rf /app/libs/__pycache__
 
-EXPOSE 8096
+# 🌟 同时暴露 7860 (给HF检测) 和 8096 (给Emby)
+EXPOSE 7860 8096
 
 ENTRYPOINT ["/usr/local/bin/entry_point"]
