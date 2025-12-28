@@ -1,5 +1,43 @@
 #!/bin/bash
 
+# =========================================================
+# 🌟 Cloudflare Tunnel 启动逻辑 (读取环境变量 CF_TOKEN) 🌟
+# =========================================================
+
+echo "🚀 [Network] 初始化 Cloudflare Tunnel..."
+
+# 1. 下载 cloudflared (如果不存在)
+if [ ! -f "/usr/local/bin/cloudflared" ]; then
+    echo "📥 [Network] 正在下载 cloudflared..."
+    curl -L --output cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+    chmod +x cloudflared
+    mv cloudflared /usr/local/bin/cloudflared
+fi
+
+# 2. 启动隧道
+# 注意：这里读取环境变量 $CF_TOKEN，请在 HF Settings -> Secrets 中设置
+if [ -n "$CF_TOKEN" ]; then
+    echo "✅ [Network] 检测到 CF_TOKEN，正在启动加速隧道..."
+    
+    # 清理可能残留的进程
+    pkill -f cloudflared || true
+    
+    # 后台启动，日志重定向防止刷屏
+    nohup cloudflared tunnel --no-autoupdate run --token "$CF_TOKEN" > /dev/null 2>&1 &
+    
+    echo "✅ [Network] Cloudflare Tunnel 已在后台运行！请使用你的自定义域名访问。"
+else
+    echo "⚠️ [Network] 未检测到 CF_TOKEN 环境变量，跳过加速启动。"
+fi
+
+echo "========================================================"
+echo "   网络配置完成，开始启动 Emby 服务..."
+echo "========================================================"
+
+# =========================================================
+# 👇 下面是原有的启动逻辑 (保持不变) 👇
+# =========================================================
+
 echo "========== Inference Node (Direct WebDAV Mode) =========="
 
 # 1. WebDAV 备份恢复
