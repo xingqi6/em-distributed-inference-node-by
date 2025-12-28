@@ -2,49 +2,83 @@
 
 log_proc() { echo "[Internal] $1"; }
 
-# 1. 等待 Alist
-log_proc "Waiting for Alist API..."
-while ! curl -s http://127.0.0.1:5244/api/public/settings > /dev/null; do
+# 等待服务启动
+log_proc "Waiting for Alist..."
+for i in {1..30}; do
+    if curl -s http://127.0.0.1:5244/api/public/settings > /dev/null; then
+        break
+    fi
     sleep 2
 done
 
-# 2. 等待 WebDAV 代理
-log_proc "Waiting for HF WebDAV Proxy (port 8080)..."
-count=0
-while ! curl -s http://127.0.0.1:8080/ > /dev/null; do
+log_proc "Waiting for WebDAV Proxy..."
+for i in {1..30}; do
+    if curl -s http://127.0.0.1:8080/ > /dev/null; then
+        log_proc "✅ Proxy ready"
+        break
+    fi
     sleep 2
-    count=$((count+1))
-    if [ $count -gt 30 ]; then
-        log_proc "❌ Proxy timeout! Check python logs."
+    if [ $i -eq 30 ]; then
+        log_proc "❌ Proxy timeout!"
+        python3 -c "from huggingface_hub import HfApi; print(list(HfApi().list_repo_tree('$DATASET_MUSIC_NAME', repo_type='dataset'))[:5])"
         exit 1
     fi
 done
-log_proc "✅ Proxy is ready."
 
+# 登录 Alist
 TOKEN=$(curl -s -X POST http://127.0.0.1:5244/api/auth/login \
     -H "Content-Type: application/json" \
     -d '{"username":"admin","password":"password"}' | jq -r '.data.token')
 
-# === 调试：打印所有支持的驱动名 ===
-log_proc "Available drivers in Alist:"
-curl -s -H "Authorization: $TOKEN" http://127.0.0.1:5244/api/admin/driver/list | jq -r '.data[].name'
+if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+    log_proc "❌ Failed to get Alist token"
+    exit 1
+fi
 
-# === 尝试挂载 ===
-# Alist 最新版通常使用 "WebDav" (注意大小写)
-DRIVER_NAME="WebDav"
+# 检测可用驱动
+log_proc "Detecting WebDAV driver..."
+DRIVERS=$(curl -s -H "Authorization: $TOKEN" http://127.0.0.1:5244/api/admin/driver/list)
+log_proc "Available drivers: $(echo $DRIVERS | jq -r '.data[].name' | tr '\n' ', ')"
 
-log_proc "Using driver: '$DRIVER_NAME'"
+# 尝试常见的驱动名称
+for DRIVER_NAME in "WebDAV" "WebDav" "Webdav" "webdav"; do
+    MATCH=$(echo "$DRIVERS" | jq -r ".data[] | select(.name == \"$DRIVER_NAME\") | .name")
+    if [ -n "$MATCH" ]; then
+        log_proc "✅ Using driver: $DRIVER_NAME"
+        break
+    fi
+done
 
-PAYLOAD=$(jq -n \
-    --arg path "/ExternalData" \
-    --arg driver "$DRIVER_NAME" \
-    --arg url "http://127.0.0.1:8080" \
-    '{mount_path: $path, order: 0, remark: "HF_Proxy", cache_expiration: 30, driver: $driver, addition: "{\"root_folder_path\":\"/\",\"url\":$url,\"username\":\"admin\",\"password\":\"admin\"}"}')
+if [ -z "$DRIVER_NAME" ]; then
+    log_proc "❌ No WebDAV driver found!"
+    exit 1
+fi
 
-log_proc "Mounting Local WebDAV Proxy..."
+# 挂载
+PAYLOAD=$(cat <<EOF
+{
+  "mount_path": "/ExternalData",
+  "order": 0,
+  "remark": "HF_Proxy",
+  "cache_expiration": 30,
+  "driver": "$DRIVER_NAME",
+  "addition": "{\"root_folder_path\":\"/\",\"url\":\"http://127.0.0.1:8080\",\"username\":\"admin\",\"password\":\"admin\"}"
+}
+EOF
+)
+
+log_proc "Mounting..."
 RESPONSE=$(curl -s -X POST http://127.0.0.1:5244/api/admin/storage/create \
     -H "Authorization: $TOKEN" \
     -H "Content-Type: application/json" \
     -d "$PAYLOAD")
 
-log_proc "Mount response: $RESPONSE"
+CODE=$(echo "$RESPONSE" | jq -r '.code')
+MSG=$(echo "$RESPONSE" | jq -r '.message')
+
+if [ "$CODE" = "200" ]; then
+    log_proc "✅ Mount successful"
+else
+    log_proc "❌ Mount failed: $MSG"
+    log_proc "Response: $RESPONSE"
+fi
