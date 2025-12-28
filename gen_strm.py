@@ -108,7 +108,7 @@ def create_strm(webdav_path):
     
     # HF 直链
     repo_id = os.environ.get("DATASET_MUSIC_NAME")
-    stream_url = f"https://huggingface.co/datasets/{repo_id}/resolve/main/{urllib.parse.quote(rel_path)}"
+    stream_url = f"https://ey.2rr.dpdns.org?url={urllib.parse.quote(hf_url)}"
     
     try:
         with open(local_file_path, 'w', encoding='utf-8') as f:
