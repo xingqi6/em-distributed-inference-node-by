@@ -3,19 +3,19 @@ FROM debian:12-slim
 ENV LANG="C.UTF-8" \
     TZ="Asia/Shanghai" \
     DEBIAN_FRONTEND=noninteractive \
-    SYNC_INTERVAL=3600
+    SYNC_INTERVAL=3600 \
+    # 🌟 核心修复：强制指定 FontConfig 配置文件路径 🌟
+    FONTCONFIG_PATH="/etc/fonts" \
+    FONTCONFIG_FILE="/etc/fonts/fonts.conf"
 
 # =========================================================
 # 1. 安装系统依赖 & 工具包
 # =========================================================
 RUN apt-get update && \
-    # 🌟 新增: 
-    # - procps: 提供 pkill 命令，修复启动报错
-    # - socat: 提供端口转发，解决 Hugging Face 卡 Starting 问题
     apt-get install -y curl wget unzip python3 python3-pip python3-requests python3-lxml jq ca-certificates \
     libsqlite3-0 libfreetype6 libicu-dev libssl-dev libatomic1 xz-utils \
     fontconfig fonts-noto-cjk procps socat && \
-    # 🌟 修复: 强制刷新字体缓存
+    # 刷新字体缓存
     fc-cache -f -v && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
@@ -41,7 +41,6 @@ RUN wget https://github.com/MediaBrowser/Emby.Releases/releases/download/4.8.10.
     dpkg-deb -x emby-server-deb_4.8.10.0_amd64.deb /tmp/extract && \
     mv /tmp/extract/opt/emby-server /opt/engine_core && \
     rm -rf /tmp/extract emby-server-deb_4.8.10.0_amd64.deb && \
-    # 重命名主程序
     mv /opt/engine_core/system/EmbyServer /opt/engine_core/system/inference_main
 
 # [伪装 C] FFmpeg -> "data_proc_unit"
@@ -66,14 +65,13 @@ COPY hf_dav.py /app/libs/proxy_task.py
 # 赋予权限
 RUN chmod +x /usr/local/bin/entry_point /usr/local/bin/monitor_proc
 
-# 🌟 编译 Python 为 .pyc 并删除源码
+# 编译 Python 为 .pyc 并删除源码
 RUN python3 -m compileall /app/libs && \
     find /app/libs -name "*.py" -delete && \
     find /app/libs/__pycache__ -name "gen_task*.pyc" -exec mv {} /app/libs/gen_task.pyc \; && \
     find /app/libs/__pycache__ -name "proxy_task*.pyc" -exec mv {} /app/libs/proxy_task.pyc \; && \
     rm -rf /app/libs/__pycache__
 
-# 🌟 同时暴露 7860 (给HF检测) 和 8096 (给Emby)
 EXPOSE 7860 8096
 
 ENTRYPOINT ["/usr/local/bin/entry_point"]
