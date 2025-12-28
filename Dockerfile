@@ -16,6 +16,9 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+# === 🌟 关键修复：强制刷新字体缓存，解决 FFmpeg 启动报错 🌟 ===
+RUN fc-cache -f -v
+
 # 2. 安装 Python 依赖
 RUN pip3 install --no-cache-dir --break-system-packages \
     wsgidav cheroot huggingface_hub requests lxml
