@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "========== Inference Node (Proxy Mode) =========="
+echo "========== Inference Node (Direct WebDAV Mode) =========="
 
 # 1. WebDAV 备份恢复
 setup_sync_agent() {
@@ -23,39 +23,36 @@ if [ -n "$WEBDAV_URL" ]; then
 fi
 
 # 2. 启动 HF WebDAV 代理
-echo "Starting HF WebDAV Proxy (hf_dav.py)..."
-# 修复：不再重定向到文件，而是直接后台运行，这样报错会打印到 Docker Log
-# 并且记录 PID 以便检查
+echo "Starting HF WebDAV Proxy..."
 python3 /usr/local/bin/hf_dav.py &
 DAV_PID=$!
 echo "Proxy PID: $DAV_PID"
 
-# 检查一下是否立刻退出了
-sleep 3
+# 等待代理启动
+sleep 5
 if ! kill -0 $DAV_PID > /dev/null 2>&1; then
-    echo "❌ Fatal Error: hf_dav.py crashed immediately!"
-    echo "Check the logs above for Python errors."
+    echo "❌ Fatal Error: WebDAV proxy crashed!"
     exit 1
-else
-    echo "✅ Proxy is running."
 fi
 
-# 3. 启动 Alist
-echo "Starting Alist..."
-cd /opt/alist
-nohup api_resource_adapter server > /app/adapter_data/alist.log 2>&1 &
-sleep 5
-api_resource_adapter admin set password
+# 检查代理是否可访问
+for i in {1..10}; do
+    if curl -s http://127.0.0.1:8080/ > /dev/null 2>&1; then
+        echo "✅ WebDAV proxy is ready"
+        break
+    fi
+    sleep 2
+    if [ $i -eq 10 ]; then
+        echo "❌ WebDAV proxy not accessible!"
+        exit 1
+    fi
+done
 
-# 4. 挂载 (调用 internal_proc)
-/usr/local/bin/internal_proc
-
-# 5. 生成 .strm
+# 3. 生成 .strm（直接从 WebDAV 读取）
 echo "Generating .strm files..."
-sleep 2
 python3 /usr/local/bin/gen_strm.py
 
-# 6. 自动备份
+# 4. 自动备份
 if [ -n "$WEBDAV_URL" ]; then
     (
         while true; do
@@ -67,8 +64,8 @@ if [ -n "$WEBDAV_URL" ]; then
     ) &
 fi
 
-# 7. 启动 Emby
-echo "Starting Engine..."
+# 5. 启动 Emby
+echo "Starting Emby Server..."
 export LD_LIBRARY_PATH=/opt/emby-server/lib
 exec /opt/emby-server/system/model_inference_core \
     -programdata /app/config \
